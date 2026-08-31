@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SIMNOR TKPK SMP</title>
+  <title>Sistem Pelaporan Pegawai Honorer Sekolah</title>
   
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -100,7 +100,7 @@
   <div id="app" class="flex flex-1 h-full w-full overflow-hidden relative">
     
     <!-- SIDEBAR FOR DESKTOP -->
-    <aside id="sidebar" class="no-print hidden md:flex flex-col w-64 glass-panel border-r border-slate-200/80 z-20 transition-all duration-300">
+    <aside id="sidebar" class="no-print force-hidden hidden md:flex flex-col w-64 glass-panel border-r border-slate-200/80 z-20 transition-all duration-300">
       <!-- Header / Logo -->
       <div class="p-5 flex items-center justify-between border-b border-slate-100">
         <div class="flex items-center gap-3">
@@ -109,7 +109,7 @@
           </div>
           <div>
             <h1 class="font-bold text-slate-800 text-sm leading-tight" id="sidebarInstansi">SIM-HONORER</h1>
-            <p class="text-xs text-slate-500 font-medium">KOTA DUMAI</p>
+            <p class="text-xs text-slate-500 font-medium">Disdikpora Kab/Kota</p>
           </div>
         </div>
       </div>
@@ -142,7 +142,7 @@
     <main class="flex-1 flex flex-col h-full overflow-hidden relative">
       
       <!-- Top Mobile Header -->
-      <header id="mobileHeader" class="no-print md:hidden glass-panel border-b border-slate-200 px-4 py-3 flex items-center justify-between z-20">
+      <header id="mobileHeader" class="no-print force-hidden md:hidden glass-panel border-b border-slate-200 px-4 py-3 flex items-center justify-between z-20">
         <div class="flex items-center gap-3">
           <div class="w-8 h-8 rounded-lg bg-brand-600 text-white flex items-center justify-center text-sm font-bold">
             <i class="fa-solid fa-graduation-cap"></i>
@@ -166,7 +166,7 @@
       </div>
 
       <!-- MOBILE BOTTOM NAVIGATION BAR -->
-      <nav id="bottomNav" class="no-print md:hidden glass-panel border-t border-slate-200 px-2 py-2 flex items-center justify-around z-30">
+      <nav id="bottomNav" class="no-print force-hidden md:hidden glass-panel border-t border-slate-200 px-2 py-2 flex items-center justify-around z-30">
         <!-- Rendered dynamically -->
       </nav>
 
@@ -206,8 +206,8 @@ const firebaseConfig = {
       laporan: [],
       log_aktivitas: [],
       pengaturan: {
-        namaInstansi: "DISDIKBUD",
-        kabKota: "Kota Dumai",
+        namaInstansi: "Dinas Pendidikan & Kebudayaan",
+        kabKota: "Kabupaten Nusantara",
         tahunAjaran: "2025/2026"
       }
     };
@@ -409,7 +409,7 @@ const firebaseConfig = {
                 Masuk Operator Sekolah
               </button>
               <div class="text-center">
-                <p class="text-[11px] text-slate-400">Copyright. <span class="font-mono text-slate-600">v1.0 daus al k</span></p>
+                <p class="text-[11px] text-slate-400">Default Demo: NPSN <span class="font-mono text-slate-600">10801001</span> | Pass <span class="font-mono text-slate-600">123</span></p>
               </div>
             </form>
 
@@ -433,7 +433,7 @@ const firebaseConfig = {
                 Masuk Administrator
               </button>
               <div class="text-center">
-                <p class="text-[11px] text-slate-400">Copyright.<span class="font-mono text-slate-600">v.1.0 daus al k.</span></p>
+                <p class="text-[11px] text-slate-400">Default Demo Admin: Email <span class="font-mono text-slate-600">admin@dinas.go.id</span> | Pass <span class="font-mono text-slate-600">admin123</span></p>
               </div>
             </form>
 
@@ -1599,6 +1599,10 @@ const firebaseConfig = {
     };
 
     window.onload = async function() {
+      // Ensure app chrome is hidden immediately (in addition to the
+      // force-hidden class already set in the initial markup), before
+      // the async setup below has a chance to run.
+      toggleAppChrome(false);
       initPWA();
       await autoSetupDatabase();
       
