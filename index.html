@@ -650,7 +650,7 @@ const firebaseConfig = {
           <div class="p-6 rounded-3xl bg-gradient-to-r from-brand-700 via-brand-600 to-sky-500 text-white shadow-xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
             <div>
               <span class="px-3 py-1 rounded-full bg-white/20 backdrop-blur-md text-xs font-semibold text-white inline-block mb-2">Tahun Ajaran ${state.pengaturan.tahunAjaran}</span>
-              <h2 class="text-2xl font-bold">${currentUser.role === 'admin' ? 'Dashboard Monitoring Dinas' : state.sekolah.find(s=>s.id === currentUser.data.id)?.namaSekolah || 'Dashboard Sekolah'}</h2>
+              <h2 class="text-2xl font-bold">${currentUser.role === 'admin' ? 'Dashboard Monitoring' : state.sekolah.find(s=>s.id === currentUser.data.id)?.namaSekolah || 'Dashboard Sekolah'}</h2>
               <p class="text-xs text-sky-100 mt-1">${state.pengaturan.namaInstansi} - ${state.pengaturan.kabKota}</p>
             </div>
             ${currentUser.role === 'sekolah' ? `
