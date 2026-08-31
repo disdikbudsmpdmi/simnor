@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sistem Informasi Pegawai TKPK SMP</title>
+  <title>Sistem Pelaporan Pegawai Honorer Sekolah</title>
   
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -77,6 +77,11 @@
       .print-only { display: block !important; }
       body { background: white; }
     }
+    /* Force-hide the app chrome (sidebar, mobile header, bottom nav) while on the login screen,
+       regardless of the responsive display classes (hidden md:flex, etc.) */
+    .force-hidden {
+      display: none !important;
+    }
   </style>
 </head>
 <body class="h-screen w-screen overflow-hidden flex flex-col bg-slate-50">
@@ -103,8 +108,8 @@
             <i class="fa-solid fa-graduation-cap"></i>
           </div>
           <div>
-            <h1 class="font-bold text-slate-800 text-sm leading-tight" id="sidebarInstansi">SIMNOR</h1>
-            <p class="text-xs text-slate-500 font-medium">Disdikbud Kota Dumai</p>
+            <h1 class="font-bold text-slate-800 text-sm leading-tight" id="sidebarInstansi">SIM-HONORER</h1>
+            <p class="text-xs text-slate-500 font-medium">Disdikpora Kab/Kota</p>
           </div>
         </div>
       </div>
@@ -137,7 +142,7 @@
     <main class="flex-1 flex flex-col h-full overflow-hidden relative">
       
       <!-- Top Mobile Header -->
-      <header class="no-print md:hidden glass-panel border-b border-slate-200 px-4 py-3 flex items-center justify-between z-20">
+      <header id="mobileHeader" class="no-print md:hidden glass-panel border-b border-slate-200 px-4 py-3 flex items-center justify-between z-20">
         <div class="flex items-center gap-3">
           <div class="w-8 h-8 rounded-lg bg-brand-600 text-white flex items-center justify-center text-sm font-bold">
             <i class="fa-solid fa-graduation-cap"></i>
@@ -352,7 +357,20 @@ const firebaseConfig = {
       state.log_aktivitas.unshift(newLog);
     }
 
+    // Show/hide the sidebar, mobile header, and bottom nav depending on login state.
+    // These live outside #contentView, so they must be toggled explicitly —
+    // clearing #contentView alone (login form) does not hide them.
+    function toggleAppChrome(loggedIn) {
+      const sidebar = document.getElementById('sidebar');
+      const mobileHeader = document.getElementById('mobileHeader');
+      const bottomNav = document.getElementById('bottomNav');
+      [sidebar, mobileHeader, bottomNav].forEach(el => {
+        if (el) el.classList.toggle('force-hidden', !loggedIn);
+      });
+    }
+
     function renderLoginView() {
+      toggleAppChrome(false);
       const container = document.getElementById('contentView');
       container.innerHTML = `
         <div class="min-h-[80vh] flex items-center justify-center p-4">
@@ -391,7 +409,7 @@ const firebaseConfig = {
                 Masuk Operator Sekolah
               </button>
               <div class="text-center">
-                <p class="text-[11px] text-slate-400">Copyright.<span class="font-mono text-slate-600">v1.0 Firdaus AL K.</span></p>
+                <p class="text-[11px] text-slate-400">Default Demo: NPSN <span class="font-mono text-slate-600">10801001</span> | Pass <span class="font-mono text-slate-600">123</span></p>
               </div>
             </form>
 
@@ -415,7 +433,7 @@ const firebaseConfig = {
                 Masuk Administrator
               </button>
               <div class="text-center">
-                <p class="text-[11px] text-slate-400">Copyright.<span class="font-mono text-slate-600">v1.0 Firdaus AL K.</span></p>
+                <p class="text-[11px] text-slate-400">Default Demo Admin: Email <span class="font-mono text-slate-600">admin@dinas.go.id</span> | Pass <span class="font-mono text-slate-600">admin123</span></p>
               </div>
             </form>
 
@@ -512,6 +530,8 @@ const firebaseConfig = {
     };
 
     function updateUserUI() {
+      toggleAppChrome(!!currentUser);
+
       const avatar = document.getElementById('userAvatar');
       const nameText = document.getElementById('userNameText');
       const roleBadge = document.getElementById('userRoleBadge');
