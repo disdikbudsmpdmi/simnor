@@ -695,15 +695,54 @@ const firebaseConfig = {
         </button>
       `).join('');
 
-      // Mobile Bottom Nav HTML (limit top 4)
-      const mobileMenus = menus.slice(0, 4);
-      bottomNav.innerHTML = mobileMenus.map(m => `
+      // Mobile Bottom Nav HTML (max 5 slots total; overflow goes into "Lainnya")
+      const MAX_BOTTOM_SLOTS = 5;
+      let mobileMenus = menus;
+      let overflowMenus = [];
+      if (menus.length > MAX_BOTTOM_SLOTS) {
+        mobileMenus = menus.slice(0, MAX_BOTTOM_SLOTS - 1);
+        overflowMenus = menus.slice(MAX_BOTTOM_SLOTS - 1);
+      }
+
+      // Stash overflow so the "Lainnya" button can render them on tap
+      window._overflowMenus = overflowMenus;
+      const isOverflowActive = overflowMenus.some(m => m.id === activeMenu);
+
+      let bottomHTML = mobileMenus.map(m => `
         <button onclick="navigateTo('${m.id}')" class="flex flex-col items-center justify-center py-1 px-3 text-[11px] rounded-xl transition ${activeMenu === m.id ? 'text-brand-600 font-bold' : 'text-slate-500'}">
           <i class="fa-solid ${m.icon} text-base mb-0.5"></i>
           <span>${m.label}</span>
         </button>
       `).join('');
+
+      if (overflowMenus.length > 0) {
+        bottomHTML += `
+          <button onclick="openMoreMenu()" class="flex flex-col items-center justify-center py-1 px-3 text-[11px] rounded-xl transition ${isOverflowActive ? 'text-brand-600 font-bold' : 'text-slate-500'}">
+            <i class="fa-solid fa-ellipsis text-base mb-0.5"></i>
+            <span>Lainnya</span>
+          </button>
+        `;
+      }
+
+      bottomNav.innerHTML = bottomHTML;
     }
+
+    // "Lainnya" (More) sheet — surfaces any menu items that don't fit in the 5 bottom-nav slots
+    window.openMoreMenu = function() {
+      const overflowMenus = window._overflowMenus || [];
+      const itemsHTML = overflowMenus.map(m => `
+        <button onclick="navigateToFromMore('${m.id}')" class="w-full flex items-center gap-3 px-3.5 py-3 rounded-xl text-left transition ${activeMenu === m.id ? 'bg-brand-600 text-white font-semibold shadow-md shadow-brand-600/20' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'}">
+          <i class="fa-solid ${m.icon} w-5 text-center"></i>
+          <span class="text-sm">${m.label}</span>
+        </button>
+      `).join('');
+      openModal('Menu Lainnya', `<div class="space-y-1">${itemsHTML}</div>`);
+    };
+
+    window.navigateToFromMore = function(menuId) {
+      closeModal();
+      navigateTo(menuId);
+    };
 
     window.navigateTo = function(menuId) {
       if (!currentUser && menuId !== 'login') {
