@@ -1070,13 +1070,40 @@ const firebaseConfig = {
       }
     };
 
+    let pegawaiSearchQuery = '';
+    let pegawaiRowsPerPage = 10;
+    let pegawaiCurrentPage = 1;
+
     function renderPegawaiView(container) {
       let pegawaiList = state.pegawai;
-      
+
       // If user is school operator, filter only their own school
       if (currentUser.role === 'sekolah') {
         pegawaiList = state.pegawai.filter(p => p.sekolahId === currentUser.data.id);
       }
+
+      // Attach sekolah name once so it can be searched & displayed
+      const enriched = pegawaiList.map(p => ({
+        ...p,
+        _sekolahNama: (state.sekolah.find(s => s.id === p.sekolahId) || {}).namaSekolah || ''
+      }));
+
+      const q = pegawaiSearchQuery.trim().toLowerCase();
+      const filtered = q ? enriched.filter(p =>
+        (p.nama || '').toLowerCase().includes(q) ||
+        (p.nik || '').toLowerCase().includes(q) ||
+        (p.nuptk || '').toLowerCase().includes(q) ||
+        (p.jabatan || '').toLowerCase().includes(q) ||
+        (p.pendidikan || '').toLowerCase().includes(q) ||
+        (p._sekolahNama || '').toLowerCase().includes(q)
+      ) : enriched;
+
+      const totalItems = filtered.length;
+      const totalPages = Math.max(1, Math.ceil(totalItems / pegawaiRowsPerPage));
+      if (pegawaiCurrentPage > totalPages) pegawaiCurrentPage = totalPages;
+      if (pegawaiCurrentPage < 1) pegawaiCurrentPage = 1;
+      const startIdx = (pegawaiCurrentPage - 1) * pegawaiRowsPerPage;
+      const pageItems = filtered.slice(startIdx, startIdx + pegawaiRowsPerPage);
 
       container.innerHTML = `
         <div class="space-y-5">
@@ -1088,6 +1115,20 @@ const firebaseConfig = {
             <button onclick="openModalTambahPegawai()" class="px-4 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-semibold text-xs shadow-md transition flex items-center gap-2">
               <i class="fa-solid fa-user-plus"></i> Tambah Pegawai Honorer
             </button>
+          </div>
+
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div class="relative w-full sm:max-w-xs">
+              <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+              <input type="text" id="pegawaiSearchInput" oninput="handlePegawaiSearch(this.value)" value="${(pegawaiSearchQuery || '').replace(/"/g, '&quot;')}" placeholder="Cari nama, NIK, NUPTK, jabatan, atau sekolah..." class="w-full pl-9 pr-3 py-2.5 text-xs rounded-xl border border-slate-200 focus:ring-2 focus:ring-brand-500 focus:outline-none">
+            </div>
+            <div class="flex items-center gap-2 text-xs text-slate-500 shrink-0">
+              <span>Tampilkan</span>
+              <select onchange="handlePegawaiRowsPerPage(this.value)" class="p-2 text-xs rounded-xl border border-slate-200 focus:ring-2 focus:ring-brand-500 focus:outline-none">
+                ${[10, 25, 50, 100].map(n => `<option value="${n}" ${pegawaiRowsPerPage === n ? 'selected' : ''}>${n}</option>`).join('')}
+              </select>
+              <span>baris</span>
+            </div>
           </div>
 
           <div class="glass-card rounded-2xl overflow-hidden border border-slate-200/80">
@@ -1106,34 +1147,75 @@ const firebaseConfig = {
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100">
-                  ${pegawaiList.map(p => {
-                    const sek = state.sekolah.find(s => s.id === p.sekolahId);
-                    return `
-                      <tr class="hover:bg-slate-50 transition">
-                        <td class="p-4 font-semibold text-slate-800">${p.nama}</td>
-                        <td class="p-4 font-mono text-slate-600">
-                          <div>NIK: ${p.nik}</div>
-                          <div class="text-[10px] text-slate-400">NUPTK: ${p.nuptk}</div>
-                        </td>
-                        <td class="p-4 font-medium text-brand-700">${sek ? sek.namaSekolah : '-'}</td>
-                        <td class="p-4">${p.jabatan}</td>
-                        <td class="p-4 text-slate-600">${p.pendidikan}</td>
-                        <td class="p-4 text-slate-600">${p.tmt}</td>
-                        <td class="p-4"><span class="px-2 py-0.5 rounded bg-sky-50 text-sky-700 font-semibold text-[10px]">${p.sumberGaji}</span></td>
-                        <td class="p-4 text-center space-x-2">
-                          <button onclick="openModalEditPegawai('${p.id}')" class="p-2 text-brand-600 hover:bg-brand-50 rounded-lg"><i class="fa-solid fa-pen-to-square"></i></button>
-                          <button onclick="hapusPegawai('${p.id}')" class="p-2 text-rose-600 hover:bg-rose-50 rounded-lg"><i class="fa-solid fa-trash"></i></button>
-                        </td>
-                      </tr>
-                    `;
-                  }).join('')}
+                  ${pageItems.length > 0 ? pageItems.map(p => `
+                    <tr class="hover:bg-slate-50 transition">
+                      <td class="p-4 font-semibold text-slate-800">${p.nama}</td>
+                      <td class="p-4 font-mono text-slate-600">
+                        <div>NIK: ${p.nik}</div>
+                        <div class="text-[10px] text-slate-400">NUPTK: ${p.nuptk}</div>
+                      </td>
+                      <td class="p-4 font-medium text-brand-700">${p._sekolahNama || '-'}</td>
+                      <td class="p-4">${p.jabatan}</td>
+                      <td class="p-4 text-slate-600">${p.pendidikan}</td>
+                      <td class="p-4 text-slate-600">${p.tmt}</td>
+                      <td class="p-4"><span class="px-2 py-0.5 rounded bg-sky-50 text-sky-700 font-semibold text-[10px]">${p.sumberGaji}</span></td>
+                      <td class="p-4 text-center space-x-2">
+                        <button onclick="openModalEditPegawai('${p.id}')" class="p-2 text-brand-600 hover:bg-brand-50 rounded-lg"><i class="fa-solid fa-pen-to-square"></i></button>
+                        <button onclick="hapusPegawai('${p.id}')" class="p-2 text-rose-600 hover:bg-rose-50 rounded-lg"><i class="fa-solid fa-trash"></i></button>
+                      </td>
+                    </tr>
+                  `).join('') : `
+                    <tr>
+                      <td colspan="8" class="p-8 text-center text-slate-400 text-xs">
+                        ${q ? 'Tidak ada data yang cocok dengan pencarian.' : 'Belum ada data pegawai honorer.'}
+                      </td>
+                    </tr>
+                  `}
                 </tbody>
               </table>
+            </div>
+
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 border-t border-slate-100 text-xs text-slate-500">
+              <span>${totalItems > 0 ? `Menampilkan ${startIdx + 1}-${Math.min(startIdx + pegawaiRowsPerPage, totalItems)} dari ${totalItems} data` : 'Tidak ada data'}</span>
+              <div class="flex items-center gap-1">
+                <button onclick="pegawaiGoToPage(${pegawaiCurrentPage - 1})" ${pegawaiCurrentPage <= 1 ? 'disabled' : ''} class="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition">
+                  <i class="fa-solid fa-chevron-left text-[10px]"></i>
+                </button>
+                <span class="px-2 font-medium text-slate-700">${pegawaiCurrentPage} / ${totalPages}</span>
+                <button onclick="pegawaiGoToPage(${pegawaiCurrentPage + 1})" ${pegawaiCurrentPage >= totalPages ? 'disabled' : ''} class="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition">
+                  <i class="fa-solid fa-chevron-right text-[10px]"></i>
+                </button>
+              </div>
             </div>
           </div>
         </div>
       `;
     }
+
+    // Re-renders the table on every keystroke, then restores focus/caret so
+    // typing feels continuous even though the DOM was rebuilt.
+    window.handlePegawaiSearch = function(value) {
+      pegawaiSearchQuery = value;
+      pegawaiCurrentPage = 1;
+      renderPegawaiView(document.getElementById('contentView'));
+      const input = document.getElementById('pegawaiSearchInput');
+      if (input) {
+        input.focus();
+        const len = input.value.length;
+        input.setSelectionRange(len, len);
+      }
+    };
+
+    window.handlePegawaiRowsPerPage = function(value) {
+      pegawaiRowsPerPage = parseInt(value);
+      pegawaiCurrentPage = 1;
+      renderPegawaiView(document.getElementById('contentView'));
+    };
+
+    window.pegawaiGoToPage = function(page) {
+      pegawaiCurrentPage = page;
+      renderPegawaiView(document.getElementById('contentView'));
+    };
 
     window.openModalTambahPegawai = function() {
       const isSekolah = currentUser.role === 'sekolah';
