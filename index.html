@@ -236,6 +236,136 @@ const firebaseConfig = {
       return doc(db, 'artifacts', appId, 'public', 'data', collName, docId);
     }
 
+    // ---- Firestore CRUD helpers -------------------------------------------------
+    // Every write includes an `id` field on the document itself (in addition to
+    // the Firestore doc id) because the security rules require
+    // request.resource.data.keys().hasAll(['id']) for unauthenticated create/update.
+    function generateId(prefix) {
+      return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    }
+
+    const usingFirestore = () => !!db && !window.IS_PREVIEW;
+
+    // Create or fully replace a document. Throws on Firestore failure so callers
+    // can show a toast; falls back to the in-memory array only when there is no
+    // live Firestore connection at all (preview mode).
+    async function fsSave(collName, id, data) {
+      const payload = { ...data, id };
+      if (usingFirestore()) {
+        await setDoc(getPublicDocPath(collName, id), payload);
+      } else {
+        state[collName].push(payload);
+      }
+      return payload;
+    }
+
+    async function fsUpdate(collName, id, patch) {
+      if (usingFirestore()) {
+        await updateDoc(getPublicDocPath(collName, id), patch);
+      } else {
+        const item = state[collName].find(x => x.id === id);
+        if (item) Object.assign(item, patch);
+      }
+    }
+
+    async function fsRemove(collName, id) {
+      if (usingFirestore()) {
+        await deleteDoc(getPublicDocPath(collName, id));
+      } else {
+        state[collName] = state[collName].filter(x => x.id !== id);
+      }
+    }
+
+    // Re-render whatever view is currently on screen if it depends on data that
+    // just changed underneath it (via a live Firestore listener).
+    function rerenderIfActive(menus) {
+      if (currentUser && menus.includes(activeMenu)) {
+        navigateTo(activeMenu);
+      }
+    }
+
+    // Keeps `state` live-synced with Firestore after the initial load, so changes
+    // made from another tab/device/user show up automatically.
+    function attachRealtimeListeners() {
+      if (!usingFirestore()) return;
+
+      onSnapshot(getPublicCollPath('sekolah'), (snap) => {
+        state.sekolah = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        rerenderIfActive(['dashboard', 'sekolah', 'pegawai', 'pengguna', 'monitoring', 'rekap', 'penerimaan']);
+      }, (err) => console.log('Listener sekolah gagal:', err.message));
+
+      onSnapshot(getPublicCollPath('pegawai'), (snap) => {
+        state.pegawai = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        rerenderIfActive(['dashboard', 'pegawai', 'submit_laporan']);
+      }, (err) => console.log('Listener pegawai gagal:', err.message));
+
+      onSnapshot(getPublicCollPath('periode'), (snap) => {
+        state.periode = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        rerenderIfActive(['dashboard', 'periode', 'submit_laporan', 'penerimaan', 'status_laporan']);
+      }, (err) => console.log('Listener periode gagal:', err.message));
+
+      onSnapshot(getPublicCollPath('laporan'), (snap) => {
+        state.laporan = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        rerenderIfActive(['dashboard', 'penerimaan', 'monitoring', 'rekap', 'submit_laporan', 'status_laporan']);
+      }, (err) => console.log('Listener laporan gagal:', err.message));
+
+      onSnapshot(getPublicCollPath('log_aktivitas'), (snap) => {
+        state.log_aktivitas = snap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .sort((a, b) => (b.createdAtMs || 0) - (a.createdAtMs || 0));
+        rerenderIfActive(['logs']);
+      }, (err) => console.log('Listener log gagal:', err.message));
+    }
+
+    async function loadInitialData() {
+      if (usingFirestore()) {
+        try {
+          const settingsDoc = await getDoc(getPublicDocPath('pengaturan', 'config'));
+          if (settingsDoc.exists()) {
+            state.pengaturan = { ...state.pengaturan, ...settingsDoc.data() };
+          }
+        } catch (err) {
+          console.log('Gagal memuat pengaturan dari Firestore:', err.message);
+        }
+
+        try {
+          const [sekolahSnap, pegawaiSnap, periodeSnap, laporanSnap, logSnap] = await Promise.all([
+            getDocs(getPublicCollPath('sekolah')),
+            getDocs(getPublicCollPath('pegawai')),
+            getDocs(getPublicCollPath('periode')),
+            getDocs(getPublicCollPath('laporan')),
+            getDocs(getPublicCollPath('log_aktivitas'))
+          ]);
+          state.sekolah = sekolahSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+          state.pegawai = pegawaiSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+          state.periode = periodeSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+          state.laporan = laporanSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+          state.log_aktivitas = logSnap.docs
+            .map(d => ({ id: d.id, ...d.data() }))
+            .sort((a, b) => (b.createdAtMs || 0) - (a.createdAtMs || 0));
+        } catch (err) {
+          console.log('Gagal memuat data awal dari Firestore:', err.message);
+          showToast('Gagal terhubung ke database Firebase: ' + err.message, 'error');
+        }
+
+        // Keep state in sync after the initial load (other tabs/users/devices).
+        attachRealtimeListeners();
+      }
+
+      try {
+        const local = localStorage.getItem('simhonorer_pengaturan');
+        if (local) {
+          const parsed = JSON.parse(local);
+          state.pengaturan = { ...state.pengaturan, ...parsed };
+        }
+      } catch (err) {
+        console.log('Gagal memuat pengaturan dari localStorage:', err.message);
+      }
+
+      const instansiEl = document.getElementById('sidebarInstansi');
+      if (instansiEl) instansiEl.innerText = state.pengaturan.namaInstansi || 'SIM-HONORER';
+    }
+
     // Register dynamic Service Worker Blob
     function initPWA() {
       if ('serviceWorker' in navigator) {
@@ -298,15 +428,19 @@ const firebaseConfig = {
     };
 
     function addAuditLog(aksi, detail) {
+      const id = generateId('log');
       const newLog = {
-        id: 'log-' + Date.now(),
+        id,
         timestamp: new Date().toLocaleString('id-ID'),
+        createdAtMs: Date.now(),
         user: currentUser ? (currentUser.role === 'admin' ? 'Admin (' + currentUser.data.email + ')' : currentUser.data.namaSekolah) : 'Anonim',
         role: currentUser ? currentUser.role : 'Guest',
         aksi,
         detail
       };
       state.log_aktivitas.unshift(newLog);
+      // Fire-and-forget: don't block the calling action on the log write.
+      fsSave('log_aktivitas', id, newLog).catch(err => console.log('Gagal menyimpan log aktivitas:', err.message));
     }
 
     // Show/hide the sidebar, mobile header, and bottom nav depending on login state.
@@ -488,6 +622,7 @@ const firebaseConfig = {
       const nameText = document.getElementById('userNameText');
       const roleBadge = document.getElementById('userRoleBadge');
       const mobileRole = document.getElementById('mobileRoleBadge');
+      const sidebarInstansi = document.getElementById('sidebarInstansi');
 
       if (currentUser) {
         if (currentUser.role === 'admin') {
@@ -504,6 +639,7 @@ const firebaseConfig = {
           mobileRole.innerText = 'Sekolah';
         }
       }
+      if (sidebarInstansi) sidebarInstansi.innerText = state.pengaturan.namaInstansi || 'SIM-HONORER';
       renderNavigation();
     }
 
@@ -813,7 +949,7 @@ const firebaseConfig = {
       `);
     };
 
-    window.simpanSekolah = function(e) {
+    window.simpanSekolah = async function(e) {
       e.preventDefault();
       const npsn = document.getElementById('mNpsn').value.trim();
       const jenjang = document.getElementById('mJenjang').value;
@@ -821,16 +957,18 @@ const firebaseConfig = {
       const kecamatan = document.getElementById('mKecamatan').value.trim();
       const password = document.getElementById('mPassword').value.trim();
 
-      const newSekolah = {
-        id: 'sek-' + Date.now(),
-        npsn, jenjang, namaSekolah, kecamatan, password, status: 'Aktif'
-      };
+      const id = generateId('sek');
+      const newSekolah = { id, npsn, jenjang, namaSekolah, kecamatan, password, status: 'Aktif' };
 
-      state.sekolah.push(newSekolah);
-      addAuditLog('Tambah Sekolah', `Menambahkan sekolah ${namaSekolah} (${npsn})`);
-      showToast('Data Sekolah berhasil disimpan', 'success');
-      closeModal();
-      navigateTo('sekolah');
+      try {
+        await fsSave('sekolah', id, newSekolah);
+        addAuditLog('Tambah Sekolah', `Menambahkan sekolah ${namaSekolah} (${npsn})`);
+        showToast('Data Sekolah berhasil disimpan', 'success');
+        closeModal();
+        navigateTo('sekolah');
+      } catch (err) {
+        showToast('Gagal menyimpan ke Firebase: ' + err.message, 'error');
+      }
     };
 
     window.openModalEditSekolah = function(id) {
@@ -875,28 +1013,37 @@ const firebaseConfig = {
       `);
     };
 
-    window.updateSekolah = function(e, id) {
+    window.updateSekolah = async function(e, id) {
       e.preventDefault();
-      const s = state.sekolah.find(sek => sek.id === id);
-      if (!s) return;
-      s.npsn = document.getElementById('mNpsn').value.trim();
-      s.jenjang = document.getElementById('mJenjang').value;
-      s.namaSekolah = document.getElementById('mNamaSekolah').value.trim();
-      s.kecamatan = document.getElementById('mKecamatan').value.trim();
-      s.password = document.getElementById('mPassword').value.trim();
-      addAuditLog('Edit Sekolah', `Memperbarui data sekolah ${s.namaSekolah}`);
-      showToast('Data Sekolah berhasil diperbarui', 'success');
-      closeModal();
-      navigateTo('sekolah');
+      const patch = {
+        npsn: document.getElementById('mNpsn').value.trim(),
+        jenjang: document.getElementById('mJenjang').value,
+        namaSekolah: document.getElementById('mNamaSekolah').value.trim(),
+        kecamatan: document.getElementById('mKecamatan').value.trim(),
+        password: document.getElementById('mPassword').value.trim()
+      };
+      try {
+        await fsUpdate('sekolah', id, patch);
+        addAuditLog('Edit Sekolah', `Memperbarui data sekolah ${patch.namaSekolah}`);
+        showToast('Data Sekolah berhasil diperbarui', 'success');
+        closeModal();
+        navigateTo('sekolah');
+      } catch (err) {
+        showToast('Gagal memperbarui data: ' + err.message, 'error');
+      }
     };
 
-    window.hapusSekolah = function(id) {
-      if (confirm('Yakin ingin menghapus data sekolah ini beserta pegawai honorernya?')) {
-        state.sekolah = state.sekolah.filter(s => s.id !== id);
-        state.pegawai = state.pegawai.filter(p => p.sekolahId !== id);
+    window.hapusSekolah = async function(id) {
+      if (!confirm('Yakin ingin menghapus data sekolah ini beserta pegawai honorernya?')) return;
+      try {
+        const relatedPegawai = state.pegawai.filter(p => p.sekolahId === id);
+        await Promise.all(relatedPegawai.map(p => fsRemove('pegawai', p.id)));
+        await fsRemove('sekolah', id);
         addAuditLog('Hapus Sekolah', `Menghapus sekolah ID ${id}`);
         showToast('Sekolah berhasil dihapus', 'info');
         navigateTo('sekolah');
+      } catch (err) {
+        showToast('Gagal menghapus sekolah: ' + err.message, 'error');
       }
     };
 
@@ -1025,7 +1172,7 @@ const firebaseConfig = {
       `);
     };
 
-    window.simpanPegawai = function(e) {
+    window.simpanPegawai = async function(e) {
       e.preventDefault();
       const sekolahId = document.getElementById('pSekolahId').value;
       const nama = document.getElementById('pNama').value.trim();
@@ -1036,16 +1183,18 @@ const firebaseConfig = {
       const tmt = document.getElementById('pTmt').value;
       const sumberGaji = document.getElementById('pSumberGaji').value;
 
-      const newPegawai = {
-        id: 'peg-' + Date.now(),
-        sekolahId, nama, nik, nuptk, jabatan, pendidikan, tmt, sumberGaji, status: 'Aktif'
-      };
+      const id = generateId('peg');
+      const newPegawai = { id, sekolahId, nama, nik, nuptk, jabatan, pendidikan, tmt, sumberGaji, status: 'Aktif' };
 
-      state.pegawai.push(newPegawai);
-      addAuditLog('Tambah Honorer', `Menambahkan pegawai honorer: ${nama}`);
-      showToast('Pegawai honorer berhasil ditambahkan', 'success');
-      closeModal();
-      navigateTo('pegawai');
+      try {
+        await fsSave('pegawai', id, newPegawai);
+        addAuditLog('Tambah Honorer', `Menambahkan pegawai honorer: ${nama}`);
+        showToast('Pegawai honorer berhasil ditambahkan', 'success');
+        closeModal();
+        navigateTo('pegawai');
+      } catch (err) {
+        showToast('Gagal menyimpan data pegawai: ' + err.message, 'error');
+      }
     };
 
     window.openModalEditPegawai = function(id) {
@@ -1110,30 +1259,38 @@ const firebaseConfig = {
       `);
     };
 
-    window.updatePegawai = function(e, id) {
+    window.updatePegawai = async function(e, id) {
       e.preventDefault();
-      const p = state.pegawai.find(peg => peg.id === id);
-      if (!p) return;
-      p.sekolahId = document.getElementById('pSekolahId').value;
-      p.nama = document.getElementById('pNama').value.trim();
-      p.nik = document.getElementById('pNik').value.trim();
-      p.nuptk = document.getElementById('pNuptk').value.trim();
-      p.jabatan = document.getElementById('pJabatan').value.trim();
-      p.pendidikan = document.getElementById('pPendidikan').value.trim();
-      p.tmt = document.getElementById('pTmt').value;
-      p.sumberGaji = document.getElementById('pSumberGaji').value;
-      addAuditLog('Edit Honorer', `Memperbarui data pegawai: ${p.nama}`);
-      showToast('Pegawai honorer berhasil diperbarui', 'success');
-      closeModal();
-      navigateTo('pegawai');
+      const patch = {
+        sekolahId: document.getElementById('pSekolahId').value,
+        nama: document.getElementById('pNama').value.trim(),
+        nik: document.getElementById('pNik').value.trim(),
+        nuptk: document.getElementById('pNuptk').value.trim(),
+        jabatan: document.getElementById('pJabatan').value.trim(),
+        pendidikan: document.getElementById('pPendidikan').value.trim(),
+        tmt: document.getElementById('pTmt').value,
+        sumberGaji: document.getElementById('pSumberGaji').value
+      };
+      try {
+        await fsUpdate('pegawai', id, patch);
+        addAuditLog('Edit Honorer', `Memperbarui data pegawai: ${patch.nama}`);
+        showToast('Pegawai honorer berhasil diperbarui', 'success');
+        closeModal();
+        navigateTo('pegawai');
+      } catch (err) {
+        showToast('Gagal memperbarui data pegawai: ' + err.message, 'error');
+      }
     };
 
-    window.hapusPegawai = function(id) {
-      if (confirm('Hapus data pegawai honorer ini?')) {
-        state.pegawai = state.pegawai.filter(p => p.id !== id);
+    window.hapusPegawai = async function(id) {
+      if (!confirm('Hapus data pegawai honorer ini?')) return;
+      try {
+        await fsRemove('pegawai', id);
         addAuditLog('Hapus Honorer', `Hapus honorer ID: ${id}`);
         showToast('Pegawai dihapus', 'info');
         navigateTo('pegawai');
+      } catch (err) {
+        showToast('Gagal menghapus pegawai: ' + err.message, 'error');
       }
     };
 
@@ -1201,32 +1358,38 @@ const firebaseConfig = {
       `);
     };
 
-    window.simpanPeriode = function(e) {
+    window.simpanPeriode = async function(e) {
       e.preventDefault();
       const namaPeriode = document.getElementById('prNama').value.trim();
       const bulan = document.getElementById('prBulan').value.trim();
       const tahun = parseInt(document.getElementById('prTahun').value);
       const deadline = document.getElementById('prDeadline').value;
 
-      state.periode.forEach(p => p.statusAktif = false);
+      const id = generateId('per');
+      const newPr = { id, namaPeriode, bulan, tahun, deadline, statusAktif: true, createdAt: new Date().toISOString() };
 
-      const newPr = {
-        id: 'per-' + Date.now(),
-        namaPeriode, bulan, tahun, deadline, statusAktif: true, createdAt: new Date().toISOString()
-      };
-
-      state.periode.push(newPr);
-      addAuditLog('Tambah Periode', `Membuat periode baru: ${namaPeriode}`);
-      showToast('Periode baru diaktifkan!', 'success');
-      closeModal();
-      navigateTo('periode');
+      try {
+        // Deactivate any currently-active periode(s) before activating the new one.
+        await Promise.all(state.periode.filter(p => p.statusAktif).map(p => fsUpdate('periode', p.id, { statusAktif: false })));
+        await fsSave('periode', id, newPr);
+        addAuditLog('Tambah Periode', `Membuat periode baru: ${namaPeriode}`);
+        showToast('Periode baru diaktifkan!', 'success');
+        closeModal();
+        navigateTo('periode');
+      } catch (err) {
+        showToast('Gagal menyimpan periode: ' + err.message, 'error');
+      }
     };
 
-    window.setPeriodeAktif = function(id) {
-      state.periode.forEach(p => p.statusAktif = (p.id === id));
-      addAuditLog('Ganti Periode Aktif', `Mengaktifkan periode ID: ${id}`);
-      showToast('Periode aktif diperbarui', 'info');
-      navigateTo('periode');
+    window.setPeriodeAktif = async function(id) {
+      try {
+        await Promise.all(state.periode.map(p => fsUpdate('periode', p.id, { statusAktif: p.id === id })));
+        addAuditLog('Ganti Periode Aktif', `Mengaktifkan periode ID: ${id}`);
+        showToast('Periode aktif diperbarui', 'info');
+        navigateTo('periode');
+      } catch (err) {
+        showToast('Gagal memperbarui periode: ' + err.message, 'error');
+      }
     };
 
     // Verification View
@@ -1284,29 +1447,33 @@ const firebaseConfig = {
       `;
     }
 
-    window.prosesVerifikasi = function(lapId, status) {
+    window.prosesVerifikasi = async function(lapId, status) {
       const catatan = prompt(`Masukkan Catatan Verifikasi (${status}):`, status === 'Disetujui' ? 'Data sesuai dan lengkap' : 'Harap perbaiki data NIK honorer');
-      if (catatan !== null) {
-        const lap = state.laporan.find(l => l.id === lapId);
-        if (lap) {
-          lap.status = status;
-          lap.catatanVerifikasi = catatan;
-          lap.verifiedAt = new Date().toLocaleString('id-ID');
-          lap.verifiedBy = currentUser.data.email || 'Admin';
-
-          addAuditLog('Verifikasi Laporan', `Laporan ${lapId} di-status ${status}`);
-          showToast(`Status laporan diperbarui: ${status}`, 'success');
-          navigateTo('penerimaan');
-        }
+      if (catatan === null) return;
+      try {
+        await fsUpdate('laporan', lapId, {
+          status,
+          catatanVerifikasi: catatan,
+          verifiedAt: new Date().toLocaleString('id-ID'),
+          verifiedBy: (currentUser.data && currentUser.data.email) || 'Admin'
+        });
+        addAuditLog('Verifikasi Laporan', `Laporan ${lapId} di-status ${status}`);
+        showToast(`Status laporan diperbarui: ${status}`, 'success');
+        navigateTo('penerimaan');
+      } catch (err) {
+        showToast('Gagal memperbarui status laporan: ' + err.message, 'error');
       }
     };
 
-    window.hapusLaporan = function(lapId) {
-      if (confirm('Hapus laporan ini secara permanen?')) {
-        state.laporan = state.laporan.filter(l => l.id !== lapId);
+    window.hapusLaporan = async function(lapId) {
+      if (!confirm('Hapus laporan ini secara permanen?')) return;
+      try {
+        await fsRemove('laporan', lapId);
         addAuditLog('Hapus Laporan', `Menghapus laporan ${lapId}`);
         showToast('Laporan berhasil dihapus', 'info');
         navigateTo('penerimaan');
+      } catch (err) {
+        showToast('Gagal menghapus laporan: ' + err.message, 'error');
       }
     };
 
@@ -1362,13 +1529,14 @@ const firebaseConfig = {
       `;
     }
 
-    window.handleKirimLaporan = function(e) {
+    window.handleKirimLaporan = async function(e) {
       e.preventDefault();
       const periodeId = document.getElementById('subPeriodeId').value;
       const myPegawai = state.pegawai.filter(p => p.sekolahId === currentUser.data.id);
 
+      const id = generateId('lap');
       const newLap = {
-        id: 'lap-' + Date.now(),
+        id,
         sekolahId: currentUser.data.id,
         periodeId: periodeId,
         tanggalKirim: new Date().toLocaleString('id-ID'),
@@ -1379,10 +1547,14 @@ const firebaseConfig = {
         verifiedBy: ''
       };
 
-      state.laporan.push(newLap);
-      addAuditLog('Kirim Laporan', `Sekolah ${currentUser.data.namaSekolah} mengirim laporan periode ${periodeId}`);
-      showToast('Laporan berhasil dikirimkan ke Dinas!', 'success');
-      navigateTo('status_laporan');
+      try {
+        await fsSave('laporan', id, newLap);
+        addAuditLog('Kirim Laporan', `Sekolah ${currentUser.data.namaSekolah} mengirim laporan periode ${periodeId}`);
+        showToast('Laporan berhasil dikirimkan ke Dinas!', 'success');
+        navigateTo('status_laporan');
+      } catch (err) {
+        showToast('Gagal mengirim laporan: ' + err.message, 'error');
+      }
     };
 
     // School Operator Status View
@@ -1431,12 +1603,15 @@ const firebaseConfig = {
       `;
     }
 
-    window.hapusLaporanSaya = function(lapId) {
-      if (confirm('Hapus laporan ini dari riwayat?')) {
-        state.laporan = state.laporan.filter(l => l.id !== lapId);
+    window.hapusLaporanSaya = async function(lapId) {
+      if (!confirm('Hapus laporan ini dari riwayat?')) return;
+      try {
+        await fsRemove('laporan', lapId);
         addAuditLog('Hapus Laporan', `Menghapus laporan ${lapId}`);
         showToast('Laporan berhasil dihapus', 'info');
         navigateTo('status_laporan');
+      } catch (err) {
+        showToast('Gagal menghapus laporan: ' + err.message, 'error');
       }
     };
 
@@ -1694,59 +1869,72 @@ const firebaseConfig = {
       `);
     };
 
-    window.simpanOperator = function(e) {
+    window.simpanOperator = async function(e) {
       e.preventDefault();
       const npsn = document.getElementById('oNpsn').value.trim();
       const jenjang = document.getElementById('oJenjang').value;
       const namaSekolah = document.getElementById('oNamaSekolah').value.trim();
       const kecamatan = document.getElementById('oKecamatan').value.trim();
       const password = document.getElementById('oPassword').value.trim();
-      const newSekolah = {
-        id: 'sek-' + Date.now(),
-        npsn, jenjang, namaSekolah, kecamatan, password, status: 'Aktif'
-      };
-      state.sekolah.push(newSekolah);
-      addAuditLog('Tambah Operator', `Menambahkan operator sekolah: ${namaSekolah}`);
-      showToast('Operator sekolah berhasil ditambahkan', 'success');
-      closeModal();
-      navigateTo('pengguna');
-    };
-
-    window.updateOperator = function(e, id) {
-      e.preventDefault();
-      const s = state.sekolah.find(sek => sek.id === id);
-      if (!s) return;
-      s.npsn = document.getElementById('oNpsn').value.trim();
-      s.jenjang = document.getElementById('oJenjang').value;
-      s.namaSekolah = document.getElementById('oNamaSekolah').value.trim();
-      s.kecamatan = document.getElementById('oKecamatan').value.trim();
-      s.password = document.getElementById('oPassword').value.trim();
-      addAuditLog('Edit Operator', `Memperbarui operator sekolah: ${s.namaSekolah}`);
-      showToast('Data operator berhasil diperbarui', 'success');
-      closeModal();
-      navigateTo('pengguna');
-    };
-
-    window.hapusOperator = function(id) {
-      if (confirm('Yakin ingin menghapus operator sekolah ini beserta seluruh data pegawainya?')) {
-        state.sekolah = state.sekolah.filter(s => s.id !== id);
-        state.pegawai = state.pegawai.filter(p => p.sekolahId !== id);
-        addAuditLog('Hapus Operator', `Menghapus operator sekolah ID ${id}`);
-        showToast('Operator sekolah berhasil dihapus', 'info');
+      const id = generateId('sek');
+      const newSekolah = { id, npsn, jenjang, namaSekolah, kecamatan, password, status: 'Aktif' };
+      try {
+        await fsSave('sekolah', id, newSekolah);
+        addAuditLog('Tambah Operator', `Menambahkan operator sekolah: ${namaSekolah}`);
+        showToast('Operator sekolah berhasil ditambahkan', 'success');
+        closeModal();
         navigateTo('pengguna');
+      } catch (err) {
+        showToast('Gagal menambahkan operator: ' + err.message, 'error');
       }
     };
 
-    window.resetPassSekolah = function(id) {
+    window.updateOperator = async function(e, id) {
+      e.preventDefault();
+      const patch = {
+        npsn: document.getElementById('oNpsn').value.trim(),
+        jenjang: document.getElementById('oJenjang').value,
+        namaSekolah: document.getElementById('oNamaSekolah').value.trim(),
+        kecamatan: document.getElementById('oKecamatan').value.trim(),
+        password: document.getElementById('oPassword').value.trim()
+      };
+      try {
+        await fsUpdate('sekolah', id, patch);
+        addAuditLog('Edit Operator', `Memperbarui operator sekolah: ${patch.namaSekolah}`);
+        showToast('Data operator berhasil diperbarui', 'success');
+        closeModal();
+        navigateTo('pengguna');
+      } catch (err) {
+        showToast('Gagal memperbarui operator: ' + err.message, 'error');
+      }
+    };
+
+    window.hapusOperator = async function(id) {
+      if (!confirm('Yakin ingin menghapus operator sekolah ini beserta seluruh data pegawainya?')) return;
+      try {
+        const relatedPegawai = state.pegawai.filter(p => p.sekolahId === id);
+        await Promise.all(relatedPegawai.map(p => fsRemove('pegawai', p.id)));
+        await fsRemove('sekolah', id);
+        addAuditLog('Hapus Operator', `Menghapus operator sekolah ID ${id}`);
+        showToast('Operator sekolah berhasil dihapus', 'info');
+        navigateTo('pengguna');
+      } catch (err) {
+        showToast('Gagal menghapus operator: ' + err.message, 'error');
+      }
+    };
+
+    window.resetPassSekolah = async function(id) {
       const s = state.sekolah.find(sek => sek.id === id);
-      if (s) {
-        const newP = prompt(`Reset Password untuk ${s.namaSekolah}:`, '123456');
-        if (newP) {
-          s.password = newP;
-          addAuditLog('Reset Password', `Reset password operator ${s.namaSekolah}`);
-          showToast('Password operator berhasil dirubah', 'success');
-          navigateTo('pengguna');
-        }
+      if (!s) return;
+      const newP = prompt(`Reset Password untuk ${s.namaSekolah}:`, '123456');
+      if (!newP) return;
+      try {
+        await fsUpdate('sekolah', id, { password: newP });
+        addAuditLog('Reset Password', `Reset password operator ${s.namaSekolah}`);
+        showToast('Password operator berhasil dirubah', 'success');
+        navigateTo('pengguna');
+      } catch (err) {
+        showToast('Gagal mereset password: ' + err.message, 'error');
       }
     };
 
@@ -1879,7 +2067,10 @@ const firebaseConfig = {
 
       document.getElementById('sidebarInstansi').innerText = state.pengaturan.namaInstansi;
 
-      // Persist to Firestore if connected
+      try {
+        localStorage.setItem('simhonorer_pengaturan', JSON.stringify(state.pengaturan));
+      } catch (_) {}
+
       if (db && !window.IS_PREVIEW) {
         try {
           await setDoc(getPublicDocPath('pengaturan', 'config'), state.pengaturan);
@@ -1895,6 +2086,7 @@ const firebaseConfig = {
     window.onload = async function() {
       toggleAppChrome(false);
       initPWA();
+      await loadInitialData();
       renderLoginView();
     };
   </script>
