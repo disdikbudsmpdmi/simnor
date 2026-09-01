@@ -317,13 +317,6 @@ const firebaseConfig = {
         state.laporan = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         rerenderIfActive(['dashboard', 'penerimaan', 'monitoring', 'rekap', 'submit_laporan', 'status_laporan']);
       }, (err) => console.log('Listener laporan gagal:', err.message));
-
-      onSnapshot(getPublicCollPath('log_aktivitas'), (snap) => {
-        state.log_aktivitas = snap.docs
-          .map(d => ({ id: d.id, ...d.data() }))
-          .sort((a, b) => (b.createdAtMs || 0) - (a.createdAtMs || 0));
-        rerenderIfActive(['logs']);
-      }, (err) => console.log('Listener log gagal:', err.message));
     }
 
     async function loadInitialData() {
@@ -338,20 +331,16 @@ const firebaseConfig = {
         }
 
         try {
-          const [sekolahSnap, pegawaiSnap, periodeSnap, laporanSnap, logSnap] = await Promise.all([
+          const [sekolahSnap, pegawaiSnap, periodeSnap, laporanSnap] = await Promise.all([
             getDocs(getPublicCollPath('sekolah')),
             getDocs(getPublicCollPath('pegawai')),
             getDocs(getPublicCollPath('periode')),
-            getDocs(getPublicCollPath('laporan')),
-            getDocs(getPublicCollPath('log_aktivitas'))
+            getDocs(getPublicCollPath('laporan'))
           ]);
           state.sekolah = sekolahSnap.docs.map(d => ({ id: d.id, ...d.data() }));
           state.pegawai = pegawaiSnap.docs.map(d => ({ id: d.id, ...d.data() }));
           state.periode = periodeSnap.docs.map(d => ({ id: d.id, ...d.data() }));
           state.laporan = laporanSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-          state.log_aktivitas = logSnap.docs
-            .map(d => ({ id: d.id, ...d.data() }))
-            .sort((a, b) => (b.createdAtMs || 0) - (a.createdAtMs || 0));
         } catch (err) {
           console.log('Gagal memuat data awal dari Firestore:', err.message);
           showToast('Gagal terhubung ke database Firebase: ' + err.message, 'error');
@@ -447,8 +436,9 @@ const firebaseConfig = {
         aksi,
         detail
       };
-      state.log_aktivitas.unshift(newLog);
       // Fire-and-forget: don't block the calling action on the log write.
+      // Note: not kept in local `state` anymore — the Log Aktivitas menu was removed
+      // to avoid syncing/holding the full audit history in browser memory.
       fsSave('log_aktivitas', id, newLog).catch(err => console.log('Gagal menyimpan log aktivitas:', err.message));
     }
 
@@ -674,7 +664,6 @@ const firebaseConfig = {
           { id: 'monitoring', label: 'Monitoring Realtime', icon: 'fa-desktop' },
           { id: 'rekap', label: 'Rekap & Export', icon: 'fa-print' },
           { id: 'pengguna', label: 'Kelola Pengguna', icon: 'fa-user-gear' },
-          { id: 'logs', label: 'Log Aktivitas', icon: 'fa-list-check' },
           { id: 'pengaturan', label: 'Pengaturan', icon: 'fa-sliders' }
         ];
       } else {
@@ -763,7 +752,6 @@ const firebaseConfig = {
         case 'monitoring': renderMonitoringView(container); break;
         case 'rekap': renderRekapView(container); break;
         case 'pengguna': renderPenggunaView(container); break;
-        case 'logs': renderLogsView(container); break;
         case 'pengaturan': renderPengaturanView(container); break;
         case 'submit_laporan': renderSubmitLaporanView(container); break;
         case 'status_laporan': renderStatusLaporanView(container); break;
@@ -885,19 +873,6 @@ const firebaseConfig = {
               ` : `
                 <p class="text-xs text-slate-400">Belum ada periode pelaporan yang diaktifkan oleh Admin.</p>
               `}
-
-              <div class="pt-2 border-t border-slate-100">
-                <h4 class="font-semibold text-xs text-slate-700 mb-2">Aktivitas Terakhir</h4>
-                <div class="space-y-2">
-                  ${state.log_aktivitas.slice(0, 3).map(l => `
-                    <div class="text-[11px] p-2 rounded-lg bg-slate-50">
-                      <p class="font-semibold text-slate-700">${l.aksi}</p>
-                      <p class="text-slate-500 truncate">${l.detail}</p>
-                      <span class="text-[9px] text-slate-400">${l.timestamp}</span>
-                    </div>
-                  `).join('')}
-                </div>
-              </div>
             </div>
           </div>
         </div>
@@ -1985,42 +1960,6 @@ const firebaseConfig = {
         showToast('Gagal mereset password: ' + err.message, 'error');
       }
     };
-
-    function renderLogsView(container) {
-      container.innerHTML = `
-        <div class="space-y-5">
-          <div>
-            <h2 class="text-xl font-bold text-slate-800">Log Aktivitas Sistem (Audit Trail)</h2>
-            <p class="text-xs text-slate-500">Catatan riwayat aksi pengguna secara rinci</p>
-          </div>
-
-          <div class="glass-card rounded-2xl overflow-hidden border border-slate-200/80">
-            <table class="w-full text-left border-collapse text-xs">
-              <thead>
-                <tr class="bg-slate-100/70 border-b border-slate-200 text-slate-600 font-semibold">
-                  <th class="p-4">Timestamp</th>
-                  <th class="p-4">Pengguna</th>
-                  <th class="p-4">Peran</th>
-                  <th class="p-4">Aksi</th>
-                  <th class="p-4">Detail</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-slate-100">
-                ${state.log_aktivitas.map(l => `
-                  <tr class="hover:bg-slate-50 transition">
-                    <td class="p-4 text-slate-400 font-mono text-[11px]">${l.timestamp}</td>
-                    <td class="p-4 font-semibold text-slate-800">${l.user}</td>
-                    <td class="p-4"><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-medium text-[10px]">${l.role}</span></td>
-                    <td class="p-4 font-bold text-brand-700">${l.aksi}</td>
-                    <td class="p-4 text-slate-600">${l.detail}</td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      `;
-    }
 
     function renderPengaturanView(container) {
       container.innerHTML = `
