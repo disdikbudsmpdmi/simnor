@@ -1331,15 +1331,27 @@ const firebaseConfig = {
           </div>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            ${state.periode.map(pr => `
+            ${state.periode.slice().sort((a, b) => {
+              const aIdx = typeof a.bulanIndex === 'number' ? a.bulanIndex : DAFTAR_BULAN.indexOf(a.bulan);
+              const bIdx = typeof b.bulanIndex === 'number' ? b.bulanIndex : DAFTAR_BULAN.indexOf(b.bulan);
+              return (b.tahun - a.tahun) || (bIdx - aIdx);
+            }).map(pr => `
               <div class="glass-card p-5 rounded-2xl space-y-3 border border-slate-200/80">
                 <div class="flex items-center justify-between">
                   <span class="px-3 py-1 rounded-full text-xs font-bold ${pr.statusAktif ? 'bg-emerald-100 text-emerald-700 border border-emerald-300' : 'bg-slate-100 text-slate-500'}">
                     ${pr.statusAktif ? 'PERIODE AKTIF' : 'NON-AKTIF'}
                   </span>
-                  ${!pr.statusAktif ? `
-                    <button onclick="setPeriodeAktif('${pr.id}')" class="px-3 py-1 rounded-lg bg-brand-50 text-brand-700 hover:bg-brand-100 font-semibold text-xs">Aktifkan</button>
-                  ` : ''}
+                  <div class="flex items-center gap-1">
+                    ${!pr.statusAktif ? `
+                      <button onclick="setPeriodeAktif('${pr.id}')" class="px-3 py-1 rounded-lg bg-brand-50 text-brand-700 hover:bg-brand-100 font-semibold text-xs">Aktifkan</button>
+                    ` : ''}
+                    <button onclick="openModalEditPeriode('${pr.id}')" title="Edit Periode" class="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-brand-600 hover:bg-brand-50 transition">
+                      <i class="fa-solid fa-pen text-xs"></i>
+                    </button>
+                    <button onclick="hapusPeriode('${pr.id}')" title="Hapus Periode" class="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition">
+                      <i class="fa-solid fa-trash text-xs"></i>
+                    </button>
+                  </div>
                 </div>
                 <div>
                   <h3 class="font-bold text-slate-800 text-base">${pr.namaPeriode}</h3>
@@ -1352,27 +1364,29 @@ const firebaseConfig = {
       `;
     }
 
+    const DAFTAR_BULAN = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+
     window.openModalTambahPeriode = function() {
-      openModal('Tambah Periode Pelaporan', `
+      const now = new Date();
+      openModal('Buat Periode Pelaporan Bulanan', `
         <form onsubmit="simpanPeriode(event)" class="space-y-4">
-          <div>
-            <label class="block text-xs font-medium text-slate-700 mb-1">Nama Periode</label>
-            <input type="text" id="prNama" placeholder="Contoh: Laporan Triwulan III 2026" required class="w-full p-2.5 text-xs rounded-xl border border-slate-200">
-          </div>
           <div class="grid grid-cols-2 gap-4">
             <div>
               <label class="block text-xs font-medium text-slate-700 mb-1">Bulan</label>
-              <input type="text" id="prBulan" placeholder="September" required class="w-full p-2.5 text-xs rounded-xl border border-slate-200">
+              <select id="prBulan" required class="w-full p-2.5 text-xs rounded-xl border border-slate-200">
+                ${DAFTAR_BULAN.map((b, i) => `<option value="${i}" ${i === now.getMonth() ? 'selected' : ''}>${b}</option>`).join('')}
+              </select>
             </div>
             <div>
               <label class="block text-xs font-medium text-slate-700 mb-1">Tahun</label>
-              <input type="number" id="prTahun" value="2026" required class="w-full p-2.5 text-xs rounded-xl border border-slate-200">
+              <input type="number" id="prTahun" value="${now.getFullYear()}" required class="w-full p-2.5 text-xs rounded-xl border border-slate-200">
             </div>
           </div>
           <div>
             <label class="block text-xs font-medium text-slate-700 mb-1">Tenggat Waktu / Deadline Submission</label>
             <input type="date" id="prDeadline" required class="w-full p-2.5 text-xs rounded-xl border border-slate-200">
           </div>
+          <p class="text-[11px] text-slate-400">Nama periode akan dibuat otomatis, contoh: "Laporan Bulan ${DAFTAR_BULAN[now.getMonth()]} ${now.getFullYear()}".</p>
           <div class="flex justify-end gap-2 pt-3">
             <button type="button" onclick="closeModal()" class="px-4 py-2 rounded-xl text-slate-600 text-xs font-semibold hover:bg-slate-100">Batal</button>
             <button type="submit" class="px-4 py-2 rounded-xl bg-brand-600 text-white text-xs font-semibold hover:bg-brand-700">Simpan Periode</button>
@@ -1383,13 +1397,14 @@ const firebaseConfig = {
 
     window.simpanPeriode = async function(e) {
       e.preventDefault();
-      const namaPeriode = document.getElementById('prNama').value.trim();
-      const bulan = document.getElementById('prBulan').value.trim();
+      const bulanIndex = parseInt(document.getElementById('prBulan').value);
+      const bulan = DAFTAR_BULAN[bulanIndex];
       const tahun = parseInt(document.getElementById('prTahun').value);
       const deadline = document.getElementById('prDeadline').value;
+      const namaPeriode = `Laporan Bulan ${bulan} ${tahun}`;
 
       const id = generateId('per');
-      const newPr = { id, namaPeriode, bulan, tahun, deadline, statusAktif: true, createdAt: new Date().toISOString() };
+      const newPr = { id, namaPeriode, bulan, bulanIndex, tahun, deadline, statusAktif: true, createdAt: new Date().toISOString() };
 
       try {
         // Deactivate any currently-active periode(s) before activating the new one.
@@ -1401,6 +1416,74 @@ const firebaseConfig = {
         navigateTo('periode');
       } catch (err) {
         showToast('Gagal menyimpan periode: ' + err.message, 'error');
+      }
+    };
+
+    window.openModalEditPeriode = function(id) {
+      const pr = state.periode.find(p => p.id === id);
+      if (!pr) return;
+      const currentBulanIndex = typeof pr.bulanIndex === 'number' ? pr.bulanIndex : DAFTAR_BULAN.indexOf(pr.bulan);
+      openModal('Edit Periode Pelaporan', `
+        <form onsubmit="updatePeriode(event, '${id}')" class="space-y-4">
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs font-medium text-slate-700 mb-1">Bulan</label>
+              <select id="prEditBulan" required class="w-full p-2.5 text-xs rounded-xl border border-slate-200">
+                ${DAFTAR_BULAN.map((b, i) => `<option value="${i}" ${i === currentBulanIndex ? 'selected' : ''}>${b}</option>`).join('')}
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-700 mb-1">Tahun</label>
+              <input type="number" id="prEditTahun" value="${pr.tahun}" required class="w-full p-2.5 text-xs rounded-xl border border-slate-200">
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-700 mb-1">Tenggat Waktu / Deadline Submission</label>
+            <input type="date" id="prEditDeadline" value="${pr.deadline}" required class="w-full p-2.5 text-xs rounded-xl border border-slate-200">
+          </div>
+          <div class="flex justify-end gap-2 pt-3">
+            <button type="button" onclick="closeModal()" class="px-4 py-2 rounded-xl text-slate-600 text-xs font-semibold hover:bg-slate-100">Batal</button>
+            <button type="submit" class="px-4 py-2 rounded-xl bg-brand-600 text-white text-xs font-semibold hover:bg-brand-700">Update Periode</button>
+          </div>
+        </form>
+      `);
+    };
+
+    window.updatePeriode = async function(e, id) {
+      e.preventDefault();
+      const bulanIndex = parseInt(document.getElementById('prEditBulan').value);
+      const bulan = DAFTAR_BULAN[bulanIndex];
+      const tahun = parseInt(document.getElementById('prEditTahun').value);
+      const deadline = document.getElementById('prEditDeadline').value;
+      const namaPeriode = `Laporan Bulan ${bulan} ${tahun}`;
+
+      try {
+        await fsUpdate('periode', id, { bulan, bulanIndex, tahun, deadline, namaPeriode });
+        addAuditLog('Edit Periode', `Memperbarui periode menjadi: ${namaPeriode}`);
+        showToast('Periode berhasil diperbarui', 'success');
+        closeModal();
+        navigateTo('periode');
+      } catch (err) {
+        showToast('Gagal memperbarui periode: ' + err.message, 'error');
+      }
+    };
+
+    window.hapusPeriode = async function(id) {
+      const pr = state.periode.find(p => p.id === id);
+      if (!pr) return;
+      const relatedLaporan = state.laporan.filter(l => l.periodeId === id);
+      if (relatedLaporan.length > 0) {
+        showToast(`Tidak bisa menghapus: ${relatedLaporan.length} laporan sekolah masih terkait periode ini`, 'error');
+        return;
+      }
+      if (!confirm(`Yakin ingin menghapus periode "${pr.namaPeriode}"?`)) return;
+      try {
+        await fsRemove('periode', id);
+        addAuditLog('Hapus Periode', `Menghapus periode: ${pr.namaPeriode}`);
+        showToast('Periode berhasil dihapus', 'info');
+        navigateTo('periode');
+      } catch (err) {
+        showToast('Gagal menghapus periode: ' + err.message, 'error');
       }
     };
 
